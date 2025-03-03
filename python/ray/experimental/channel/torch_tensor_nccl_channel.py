@@ -13,6 +13,7 @@ from ray.experimental.channel.communicator import Communicator
 from ray.experimental.channel.cpu_communicator import CPUCommunicator
 from ray.experimental.channel.intra_process_channel import IntraProcessChannel
 from ray.experimental.channel.nccl_group import _NcclGroup
+from ray.experimental.channel.hccl_group import _HcclGroup
 from ray.experimental.channel.shared_memory_channel import SharedMemoryType
 from ray.experimental.channel.torch_tensor_type import TorchTensorType
 from ray.util.annotations import DeveloperAPI
@@ -646,7 +647,7 @@ def _do_init_communicator(
 
     if not custom_communicator:
         assert (
-            ray.get_gpu_ids()
+            bool(ray.get_gpu_ids()) or bool("NPU" in ray.cluster_resources())
         ), "Actors participating in NCCL group must have at least one GPU assigned"
 
     ctx = ChannelContext.get_current()
@@ -655,12 +656,12 @@ def _do_init_communicator(
         ctx.communicators[group_id] = custom_communicator
     else:
         # default to NcclGroup
-        ctx.communicators[group_id] = _NcclGroup(
+        ctx.communicators[group_id] = _HcclGroup(
             world_size,
             comm_id,
             rank,
             actor_handles,
-            torch.cuda.current_stream().cuda_stream,
+            torch.npu.current_stream().npu_stream,
             use_communication_streams,
         )
 
@@ -676,13 +677,13 @@ def _do_destroy_communicator(self, group_id):
 
 
 def _do_check_has_gpu(self) -> bool:
-    return bool(ray.get_gpu_ids())
+    return bool(ray.get_gpu_ids()) or bool("NPU" in ray.cluster_resources())
 
 
 def _do_get_unique_nccl_id(self) -> bool:
-    from cupy.cuda import nccl
+    from ray.util.hccl import hccl
 
-    return nccl.get_unique_id()
+    return hccl.get_unique_id()
 
 
 def _get_ranks(
