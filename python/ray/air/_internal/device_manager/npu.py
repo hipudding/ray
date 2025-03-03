@@ -103,3 +103,11 @@ class NPUTorchDeviceManager(TorchDeviceManager):
     def get_current_stream(self):
         """Get current stream for NPU device"""
         return torch.npu.current_stream()
+
+    def create_event(self):
+        """Create a event on NPU device"""
+        return torch.npu.create_event()
+
+    def get_device_context(self, device: torch.device):
+        """Get a torch.device context on NPU device"""
+        return torch.npu.device(device)

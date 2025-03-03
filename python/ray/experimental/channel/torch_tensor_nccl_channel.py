@@ -642,7 +642,7 @@ def _do_init_communicator(
     use_communication_streams,
     custom_communicator: Optional[Communicator] = None,
 ):
-    import torch
+    from ray.air._internal.device_manager import get_torch_device_manager_by_context
 
     if not custom_communicator:
         assert (
@@ -660,7 +660,7 @@ def _do_init_communicator(
             comm_id,
             rank,
             actor_handles,
-            torch.cuda.current_stream().cuda_stream,
+            get_torch_device_manager_by_context().get_current_stream(),
             use_communication_streams,
         )
 

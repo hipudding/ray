@@ -38,3 +38,11 @@ class TorchDeviceManager(ABC):
     def get_current_stream(self):
         """Get current stream on accelerators like torch.cuda.current_stream"""
         ...
+
+    def create_event(self):
+        """Create a event"""
+        ...
+
+    def get_device_context(self, device: torch.device):
+        """Get a device context of device"""
+        ...
