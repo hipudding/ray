@@ -307,3 +307,9 @@ class _NcclGroup(Communicator):
 
     def get_transport_name(self) -> str:
         return "nccl"
+
+
+def get_unique_id() -> str:
+    from cupy.cuda import nccl
+
+    return nccl.get_unique_id()
