@@ -1,5 +1,5 @@
 import os
-from typing import List, Union
+from typing import List, Union, Optional, Any
 
 import torch
 
@@ -85,3 +85,29 @@ class CUDATorchDeviceManager(TorchDeviceManager):
     def get_device_context(self, device: torch.device) -> torch.cuda.device:
         """Get a device context for cuda device"""
         return torch.cuda.device(device)
+
+    def get_communicator(
+        self,
+        world_size: int,
+        comm_id: int,
+        rank: Optional[int],
+        actor_handles: List["ray.actor.ActorHandle"],
+        torch_stream: Optional[Any],
+        use_communication_streams: bool = False,
+    ) -> "ray.experimental.channel.communicator.Communicator":
+        """Get a communicator"""
+        from ray.experimental.channel.nccl_group import _NcclGroup
+
+        return _NcclGroup(
+            world_size=world_size,
+            comm_id=comm_id,
+            rank=rank,
+            actor_handles=actor_handles,
+            cuda_stream=torch_stream,
+            use_communication_streams=use_communication_streams,
+        )
+
+    def get_communication_id(self):
+        from ray.experimental.channel.nccl_group import get_unique_id
+
+        return get_unique_id()

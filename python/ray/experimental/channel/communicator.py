@@ -106,18 +106,20 @@ class Communicator(ABC):
         raise NotImplementedError
 
     @property
+    @abstractmethod
     def recv_stream(self):
         """
         Return the torch stream used for receiving tensors.
         """
-        return None
+        raise NotImplementedError
 
     @property
+    @abstractmethod
     def send_stream(self):
         """
         Return the torch stream used for sending tensors.
         """
-        return None
+        raise NotImplementedError
 
     @abstractmethod
     def allreduce(

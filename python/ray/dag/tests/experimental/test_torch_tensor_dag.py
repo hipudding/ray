@@ -620,14 +620,10 @@ def test_torch_tensor_custom_comm_inited(ray_start_regular):
 
         @property
         def recv_stream(self):
-            import torch
-
             return get_torch_device_manager_by_context().get_current_stream()
 
         @property
         def send_stream(self):
-            import torch
-
             return get_torch_device_manager_by_context().get_current_stream()
 
         def destroy(self) -> None:
@@ -751,14 +747,10 @@ def test_torch_tensor_default_comm(ray_start_regular, transports):
 
         @property
         def recv_stream(self):
-            import torch
-
             return get_torch_device_manager_by_context().get_current_stream()
 
         @property
         def send_stream(self):
-            import torch
-
             return get_torch_device_manager_by_context().get_current_stream()
 
         def destroy(self) -> None:
@@ -895,14 +887,10 @@ def test_torch_tensor_invalid_custom_comm(ray_start_regular):
 
         @property
         def recv_stream(self):
-            import torch
-
             return get_torch_device_manager_by_context().get_current_stream()
 
         @property
         def send_stream(self):
-            import torch
-
             return get_torch_device_manager_by_context().get_current_stream()
 
         def destroy(self) -> None:
