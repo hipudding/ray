@@ -1,6 +1,6 @@
 import os
 from importlib.util import find_spec
-from typing import List, Union
+from typing import List, Union, Optional, Any
 
 import torch
 
@@ -111,3 +111,29 @@ class NPUTorchDeviceManager(TorchDeviceManager):
     def get_device_context(self, device: torch.device):
         """Get a torch.device context on NPU device"""
         return torch.npu.device(device)
+
+    def get_communicator(
+        self,
+        world_size: int,
+        comm_id: int,
+        rank: Optional[int],
+        actor_handles: List["ray.actor.ActorHandle"],
+        torch_stream: Optional[Any],
+        use_communication_streams: bool = False,
+    ) -> "ray.experimental.channel.communicator.Communicator":
+        """Get a communicator"""
+        from ray.experimental.channel.hccl_group import _HcclGroup
+
+        return _HcclGroup(
+            world_size=world_size,
+            comm_id=comm_id,
+            rank=rank,
+            actor_handles=actor_handles,
+            cuda_stream=torch_stream,
+            use_communication_streams=use_communication_streams,
+        )
+
+    def get_communication_id(self):
+        from ray.experimental.channel.hccl_group import get_unique_id
+
+        return get_unique_id()
