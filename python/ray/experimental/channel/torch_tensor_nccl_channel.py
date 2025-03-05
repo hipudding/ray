@@ -448,13 +448,13 @@ class _TorchTensorNcclChannel(ChannelInterface):
         assert self._nccl_group is not None, "Actor is not part of a NCCL group"
         assert self._writer_registered
         ctx = ChannelContext.get_current()
-        assert ctx.torch_device.type == "cuda"
+        assert ctx.torch_device.type in ["cuda", "npu"]
 
     def ensure_registered_as_reader(self) -> bool:
         assert self._nccl_group is not None, "Actor is not part of a NCCL group"
         assert self._reader_registered
         ctx = ChannelContext.get_current()
-        assert ctx.torch_device.type == "cuda"
+        assert ctx.torch_device.type in ["cuda", "npu"]
 
     def __reduce__(self):
         return (
@@ -645,8 +645,8 @@ def _do_init_communicator(
     from ray.air._internal.device_manager import get_torch_device_manager_by_context
 
     if not custom_communicator:
-        assert (
-            ray.get_gpu_ids()
+        assert _do_check_has_acclerator(
+            self
         ), "Actors participating in NCCL group must have at least one GPU assigned"
 
     ctx = ChannelContext.get_current()
@@ -677,8 +677,8 @@ def _do_destroy_communicator(self, group_id):
     # task loop running.
 
 
-def _do_check_has_gpu(self) -> bool:
-    return bool(ray.get_gpu_ids())
+def _do_check_has_acclerator(self) -> bool:
+    return bool(ray.get_gpu_ids()) or bool("NPU" in ray.cluster_resources())
 
 
 def _do_get_unique_communication_id(self) -> bool:
@@ -742,11 +742,11 @@ def _init_communicator(
         custom_communicator, CPUCommunicator
     )
 
-    has_gpus = ray.get(
-        [actor.__ray_call__.remote(_do_check_has_gpu) for actor in actors]
+    has_acclerators = ray.get(
+        [actor.__ray_call__.remote(_do_check_has_acclerator) for actor in actors]
     )
-    for has_gpu, actor in zip(has_gpus, actors):
-        if not has_gpu and not is_cpu_communicator:
+    for has_acclerator, actor in zip(has_acclerators, actors):
+        if not has_acclerators and not is_cpu_communicator:
             raise ValueError(
                 f"Actor {actor} returns a tensor with type hint "
                 'TorchTensor(transport="nccl") or '

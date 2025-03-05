@@ -9,9 +9,10 @@ if TYPE_CHECKING:
 
 class _DriverGroupHolder(Communicator):
     """
-    Communicator place holder for Driver, Since driver may has no 
+    Communicator place holder for Driver, Since driver may has no
     Accelerators, TorchDeviceManager cannot be used.
     """
+
     def __init__(
         self,
         world_size: int,
@@ -19,7 +20,7 @@ class _DriverGroupHolder(Communicator):
         actor_handles: List["ray.actor.ActorHandle"],
     ):
         """
-        We only need to store the actor handles, since we don't need 
+        We only need to store the actor handles, since we don't need
         to initialize the communicator for Driver.
         """
         self._world_size = world_size
@@ -40,7 +41,7 @@ class _DriverGroupHolder(Communicator):
 
     def get_self_rank(self) -> Optional[int]:
         return None
-    
+
     def send(self, tensor: "torch.Tensor", peer_rank: int):
         raise NotImplementedError
 

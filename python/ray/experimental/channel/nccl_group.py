@@ -1,6 +1,6 @@
 import logging
 from types import ModuleType
-from typing import TYPE_CHECKING, List, Optional, Tuple
+from typing import TYPE_CHECKING, List, Optional, Tuple, Any
 
 import ray
 from ray.exceptions import RayChannelError
@@ -31,7 +31,7 @@ class _NcclGroup(Communicator):
         comm_id: int,
         rank: Optional[int],
         actor_handles: List["ray.actor.ActorHandle"],
-        cuda_stream,
+        cuda_stream: Optional[Any],
         use_communication_streams: bool = False,
     ):
         """
