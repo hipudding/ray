@@ -9,7 +9,6 @@ from ray.experimental.util.types import ReduceOp
 
 if TYPE_CHECKING:
     import torch
-    import torch_npu
 
 # Logger for this module. It should be configured at the entry point
 # into the program using Ray. Ray provides a default configuration at
@@ -67,7 +66,7 @@ class _HcclGroup(Communicator):
             self._acl_stream = acl_stream
 
             if use_communication_streams:
-                import torch, torch_npu
+                import torch, torch_npu  # noqa: F401
                 from ray.air._internal import torch_utils
 
                 # TODO(swang): Allow default device to be overridden.
