@@ -1,6 +1,6 @@
 import logging
 from types import ModuleType
-from typing import TYPE_CHECKING, List, Optional, Tuple, Any
+from typing import TYPE_CHECKING, List, Optional, Tuple
 
 import ray
 from ray.exceptions import RayChannelError
@@ -31,7 +31,7 @@ class _NcclGroup(Communicator):
         comm_id: int,
         rank: Optional[int],
         actor_handles: List["ray.actor.ActorHandle"],
-        cuda_stream: Optional[Any],
+        cuda_stream: Optional["torch.cuda.Stream"],
         use_communication_streams: bool = False,
     ):
         """
@@ -91,9 +91,9 @@ class _NcclGroup(Communicator):
             # Driver does not have a rank.
             self._comm = None
 
-        self._cuda_stream = None
-        self._send_stream = None
-        self._recv_stream = None
+        self._cuda_stream: Optional["torch.cuda.Stream"] = None
+        self._send_stream: Optional["torch.cuda.Stream"] = None
+        self._recv_stream: Optional["torch.cuda.Stream"] = None
         if cuda_stream is not None:
             assert rank is not None, "NCCL actor has no rank assigned"
 
@@ -279,11 +279,15 @@ class _NcclGroup(Communicator):
 
     @property
     def recv_stream(self):
-        return self._recv_stream
+        import torch
+
+        return torch.cuda.StreamContext(self._recv_stream)
 
     @property
     def send_stream(self):
-        return self._send_stream
+        import torch
+
+        return torch.cuda.StreamContext(self._send_stream)
 
     def destroy(self) -> None:
         """

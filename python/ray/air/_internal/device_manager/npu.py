@@ -1,6 +1,6 @@
 import os
 from importlib.util import find_spec
-from typing import List, Union, Optional, Any
+from typing import List, Union, Optional
 
 import torch
 
@@ -118,7 +118,7 @@ class NPUTorchDeviceManager(TorchDeviceManager):
         comm_id: int,
         rank: Optional[int],
         actor_handles: List["ray.actor.ActorHandle"],
-        torch_stream: Optional[Any],
+        torch_stream: Optional["torch.npu.Stream"],
         use_communication_streams: bool = False,
     ) -> "ray.experimental.channel.communicator.Communicator":
         """Get a communicator"""

@@ -364,17 +364,20 @@ def _device_context_manager():
     if not ChannelContext.get_current().torch_available:
         return nullcontext()
 
-    import torch
+    from ray.air._internal.device_manager import get_torch_device_manager_by_context
 
     device = ChannelContext.get_current().torch_device
 
-    if device.type == "cuda" and torch.cuda.is_available():
+    if (
+        device.type in ["cuda", "npu"]
+        and get_torch_device_manager_by_context().is_available()
+    ):
         # In the case of mocked NCCL, we may get a device with type "cuda"
         # but CUDA is not available. We return nullcontext() in that case,
         # otherwise torch raises a runtime error if the cuda device context
         # manager is used.
         # TODO(rui): consider better mocking NCCL to support device context.
-        return torch.cuda.device(device)
+        return get_torch_device_manager_by_context().get_device_context(device)
     return nullcontext()
 
 
@@ -576,8 +579,8 @@ class ExecutableTask:
         self.input_reader.start()
         self.output_writer.start()
 
-        self._send_stream = None
-        self._recv_stream = None
+        self._send_stream = nullcontext()
+        self._recv_stream = nullcontext()
         if not overlap_gpu_communication:
             return
 
@@ -596,7 +599,7 @@ class ExecutableTask:
                         nccl_group_id
                     )
                     assert nccl_group is not None
-                    if self._recv_stream is not None:
+                    if not isinstance(self._recv_stream, nullcontext):
                         assert self._recv_stream == nccl_group.recv_stream, (
                             "Currently all torch tensor input channels of a "
                             "Compiled Graph task should use the same recv cuda stream."
@@ -604,10 +607,7 @@ class ExecutableTask:
                     self._recv_stream = nccl_group.recv_stream
 
     def wrap_and_set_intermediate_future(
-        self,
-        val: Any,
-        wrap_in_gpu_future: bool,
-        stream: Any = None,
+        self, val: Any, wrap_in_gpu_future: bool
     ) -> None:
         """
         Wrap the value in a `DAGOperationFuture` and store to the intermediate future.
@@ -623,12 +623,12 @@ class ExecutableTask:
         assert self._intermediate_future is None
 
         if wrap_in_gpu_future:
-            future = GPUFuture(val, stream)
+            future = GPUFuture(val)
         else:
             future = ResolvedFuture(val)
         self._intermediate_future = future
 
-    def reset_and_wait_intermediate_future(self, stream: Any = None) -> Any:
+    def reset_and_wait_intermediate_future(self) -> Any:
         """
         Reset the intermediate future and wait for the result.
 
@@ -642,7 +642,7 @@ class ExecutableTask:
         """
         future = self._intermediate_future
         self._intermediate_future = None
-        return future.wait(stream)
+        return future.wait()
 
     def _read(self, overlap_gpu_communication: bool) -> bool:
         """
@@ -665,7 +665,6 @@ class ExecutableTask:
             self.wrap_and_set_intermediate_future(
                 input_data,
                 wrap_in_gpu_future=overlap_gpu_communication,
-                stream=self._recv_stream,
             )
         except RayChannelError:
             # Channel closed. Exit the loop.
@@ -736,7 +735,7 @@ class ExecutableTask:
         Returns:
             True if system error occurs and exit the loop; otherwise, False.
         """
-        output_val = self.reset_and_wait_intermediate_future(self._send_stream)
+        output_val = self.reset_and_wait_intermediate_future()
         exit = False
         try:
             self.output_writer.write(output_val)
@@ -767,12 +766,14 @@ class ExecutableTask:
         """
         if op_type == _DAGNodeOperationType.READ:
             with _device_context_manager():
-                return self._read(overlap_gpu_communication)
+                with self._recv_stream:
+                    return self._read(overlap_gpu_communication)
         elif op_type == _DAGNodeOperationType.COMPUTE:
             return self._compute(overlap_gpu_communication, class_handle)
         elif op_type == _DAGNodeOperationType.WRITE:
             with _device_context_manager():
-                return self._write()
+                with self._send_stream:
+                    return self._write()
 
 
 @dataclass

@@ -1,6 +1,6 @@
 import logging
 from types import ModuleType
-from typing import TYPE_CHECKING, List, Optional, Tuple, Any
+from typing import TYPE_CHECKING, List, Optional, Tuple
 
 import ray
 from ray.exceptions import RayChannelError
@@ -9,6 +9,7 @@ from ray.experimental.util.types import ReduceOp
 
 if TYPE_CHECKING:
     import torch
+    import torch_npu  # noqa: F401
 
 # Logger for this module. It should be configured at the entry point
 # into the program using Ray. Ray provides a default configuration at
@@ -30,7 +31,7 @@ class _HcclGroup(Communicator):
         comm_id: int,
         rank: Optional[int],
         actor_handles: List["ray.actor.ActorHandle"],
-        acl_stream: Optional[Any],
+        torch_stream: Optional["torch.npu.Stream"],
         use_communication_streams: bool = False,
     ):
         self._world_size = world_size
@@ -41,7 +42,7 @@ class _HcclGroup(Communicator):
 
         if rank is not None:
             assert "NPU" in ray.cluster_resources(), "HCCL actor has no NPUs assigned"
-            assert acl_stream is not None, "HCCL actor must specify aclrtStream"
+            assert torch_stream is not None, "HCCL actor must specify aclrtStream"
 
             expected_rank = self.get_rank(ray.get_runtime_context().current_actor)
             assert (
@@ -57,13 +58,13 @@ class _HcclGroup(Communicator):
             # Driver does not have a rank.
             self._comm = None
 
-        self._acl_stream: None
-        self._send_stream: None
-        self._recv_stream: None
-        if acl_stream is not None:
+        self._torch_stream: Optional["torch.npu.Stream"] = None
+        self._send_stream: Optional["torch.npu.Stream"] = None
+        self._recv_stream: Optional["torch.npu.Stream"] = None
+        if torch_stream is not None:
             assert rank is not None, "HCCL actor has no rank assigned"
 
-            self._acl_stream = acl_stream
+            self._torch_stream = torch_stream
 
             if use_communication_streams:
                 import torch
@@ -76,8 +77,8 @@ class _HcclGroup(Communicator):
                 self._send_stream = torch.npu.Stream(device=device)
                 self._recv_stream = torch.npu.Stream(device=device)
             else:
-                self._send_stream = self._acl_stream
-                self._recv_stream = self._acl_stream
+                self._send_stream = self._torch_stream
+                self._recv_stream = self._torch_stream
 
         self._closed = False
 
@@ -163,7 +164,7 @@ class _HcclGroup(Communicator):
             # need to synchronize here and check that the channel is still open to
             # ensure that the receive buffer is valid.
             # TODO(swang): Avoid CUDA synchronization.
-            self._acl_stream.synchronize()
+            self._torch_stream.synchronize()
 
         if self._closed:
             raise RayChannelError("HCCL group has been destroyed.")
@@ -189,7 +190,7 @@ class _HcclGroup(Communicator):
             send_buf.numel(),
             self.hccl.get_hccl_tensor_dtype(send_buf),
             op.value,
-            self._acl_stream.npu_stream,
+            self._torch_stream.npu_stream,
         )
 
         # Buffer values are undefined if HCCL ops are aborted. Therefore, we
@@ -197,7 +198,7 @@ class _HcclGroup(Communicator):
         # ensure that the receive buffer is valid.
         # TODO(swang): Avoid CUDA synchronization.
         # TODO(wxdeng): Use check_async_error.
-        self._acl_stream.synchronize()
+        self._torch_stream.synchronize()
         if self._closed:
             raise RayChannelError(
                 "HCCL group has been destroyed during allreduce operation. "
@@ -207,11 +208,17 @@ class _HcclGroup(Communicator):
 
     @property
     def recv_stream(self):
-        return self._recv_stream
+        import torch
+        import torch_npu  # noqa: F401
+
+        return torch.npu.utils.stream(self._recv_stream)
 
     @property
     def send_stream(self):
-        return self._send_stream
+        import torch
+        import torch_npu  # noqa: F401
+
+        return torch.npu.utils.stream(self._send_stream)
 
     def destroy(self) -> None:
         """

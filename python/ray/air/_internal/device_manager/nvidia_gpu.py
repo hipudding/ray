@@ -1,5 +1,5 @@
 import os
-from typing import List, Union, Optional, Any
+from typing import List, Union, Optional
 
 import torch
 
@@ -92,7 +92,7 @@ class CUDATorchDeviceManager(TorchDeviceManager):
         comm_id: int,
         rank: Optional[int],
         actor_handles: List["ray.actor.ActorHandle"],
-        torch_stream: Optional[Any],
+        torch_stream: Optional[torch.cuda.Stream],
         use_communication_streams: bool = False,
     ) -> "ray.experimental.channel.communicator.Communicator":
         """Get a communicator"""

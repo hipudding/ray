@@ -109,7 +109,7 @@ class Communicator(ABC):
     @abstractmethod
     def recv_stream(self):
         """
-        Return the torch stream used for receiving tensors.
+        Return the torch stream context used for receiving tensors.
         """
         raise NotImplementedError
 
@@ -117,7 +117,7 @@ class Communicator(ABC):
     @abstractmethod
     def send_stream(self):
         """
-        Return the torch stream used for sending tensors.
+        Return the torch stream context used for sending tensors.
         """
         raise NotImplementedError
 
