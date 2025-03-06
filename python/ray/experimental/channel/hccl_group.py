@@ -40,6 +40,11 @@ class _HcclGroup(Communicator):
         self._actor_handles = actor_handles
         self._use_communication_streams = use_communication_streams
 
+        from ray.air._internal import torch_utils
+
+        # TODO(swang): Allow default device to be overridden.
+        device = torch_utils.get_devices()[0]
+
         if rank is not None:
             assert "NPU" in ray.cluster_resources(), "HCCL actor has no NPUs assigned"
             assert torch_stream is not None, "HCCL actor must specify aclrtStream"
@@ -53,6 +58,7 @@ class _HcclGroup(Communicator):
 
             self.hccl = hccl
 
+            torch.npu.set_device(device)
             self._comm = self.hccl.HCCLCommunicator(world_size, comm_id, rank)
         else:
             # Driver does not have a rank.
@@ -69,10 +75,6 @@ class _HcclGroup(Communicator):
             if use_communication_streams:
                 import torch
                 import torch_npu  # noqa: F401
-                from ray.air._internal import torch_utils
-
-                # TODO(swang): Allow default device to be overridden.
-                device = torch_utils.get_devices()[0]
 
                 self._send_stream = torch.npu.Stream(device=device)
                 self._recv_stream = torch.npu.Stream(device=device)
