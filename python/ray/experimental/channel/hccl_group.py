@@ -66,7 +66,8 @@ class _HcclGroup(Communicator):
             self._acl_stream = acl_stream
 
             if use_communication_streams:
-                import torch, torch_npu  # noqa: F401
+                import torch
+                import torch_npu  # noqa: F401
                 from ray.air._internal import torch_utils
 
                 # TODO(swang): Allow default device to be overridden.
