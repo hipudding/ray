@@ -18,6 +18,16 @@ logger = logging.getLogger(__name__)
 
 
 def set_default_device():
+    """
+    Set the default NPU device for PyTorch.
+
+    This function initializes the NPU device by selecting the first available device
+    from `torch_utils.get_devices()`. It then sets the selected device as the default
+    NPU device using `torch.npu.set_device(device)`.
+
+    Returns:
+        torch.device: The selected NPU device.
+    """
     import torch
     import torch_npu  # noqa: F401
     from ray.air._internal import torch_utils
@@ -28,6 +38,16 @@ def set_default_device():
 
 
 class StreamContext:
+    """
+    Context-manager that selects a given stream.
+
+    Stream context, in which torch.npu.current_stream will be set to the value in the context. This class comes from pytorch because torch for NPU does not implement this context
+
+    Args:
+        Stream (Stream): selected stream. This manager is a no-op if it's
+            ``None``.
+    note:: Streams are per-device.
+    """
 
     cur_stream: Optional["torch.npu.Stream"]
 
@@ -92,9 +112,37 @@ class _HcclGroup(Communicator):
         comm_id: int,
         rank: Optional[int],
         actor_handles: List["ray.actor.ActorHandle"],
-        torch_stream: Optional["torch.npu.Stream"],
+        npu_stream: Optional["torch.npu.Stream"],
         use_communication_streams: bool = False,
     ):
+        """
+        Initialize a HCCL communicator that can be used to communicate p2p with
+        other NPU actors.
+
+        This method blocks until the same call has been made on all other
+        actors in the group, with the same arguments for world_size and
+        comm_id.
+
+        If the user can guarantee that all involved actors execute the same ops
+        in the same order, then the other HCCL group should use the given
+        `npu_stream`, and there will not be a concurrency issue. Otherwise,
+        the other stream needs to synchronize with the given `npu_stream`
+        before and after it launches HCCL ops, e.g., at the beginning and end
+        of a DAG task.
+
+        Args:
+            world_size: The number of participating actors/devices.
+            comm_id: A unique communicator ID returned by
+                hccl.get_unique_id().
+            rank: The rank of this actor. If None, then the caller is not a
+                participant of the HCCL group.
+            actor_handles: A list of actor handles, in rank order.
+            npu_stream: A torch.npu.Stream to dispatch HCCL ops to. If rank is
+                specified, then this must be specified too.
+            use_communication_streams: Whether to use dedicated send and recv
+                streams for communication. If True, communication and computation
+                can be overlapped to improve performance.
+        """
         self._world_size = world_size
         self._rank: Optional[int] = rank
         self.hccl: Optional[ModuleType] = None
@@ -105,7 +153,7 @@ class _HcclGroup(Communicator):
 
         if rank is not None:
             assert "NPU" in ray.cluster_resources(), "HCCL actor has no NPUs assigned"
-            assert torch_stream is not None, "HCCL actor must specify aclrtStream"
+            assert npu_stream is not None, "HCCL actor must specify aclrtStream"
 
             expected_rank = self.get_rank(ray.get_runtime_context().current_actor)
             assert (
@@ -121,13 +169,13 @@ class _HcclGroup(Communicator):
             # Driver does not have a rank.
             self._comm = None
 
-        self._torch_stream: Optional["torch.npu.Stream"] = None
+        self._npu_stream: Optional["torch.npu.Stream"] = None
         self._send_stream: Optional["torch.npu.Stream"] = None
         self._recv_stream: Optional["torch.npu.Stream"] = None
-        if torch_stream is not None:
+        if npu_stream is not None:
             assert rank is not None, "HCCL actor has no rank assigned"
 
-            self._torch_stream = torch_stream
+            self._npu_stream = npu_stream
 
             if use_communication_streams:
                 import torch
@@ -136,18 +184,28 @@ class _HcclGroup(Communicator):
                 self._send_stream = torch.npu.Stream(device=device)
                 self._recv_stream = torch.npu.Stream(device=device)
             else:
-                self._send_stream = self._torch_stream
-                self._recv_stream = self._torch_stream
+                self._send_stream = self._npu_stream
+                self._recv_stream = self._npu_stream
 
         self._closed = False
 
     def initialize(self, rank: int) -> None:
+        # No additional initialization is needed.
         pass
 
     def get_actor_handles(self) -> List["ray.actor.ActorHandle"]:
+        """
+        Return all actor handles.
+        """
         return self._actor_handles
 
     def get_rank(self, actor: ray.actor.ActorHandle) -> int:
+        """
+        Return the given actor's rank in the HCCL communicator.
+
+        Args:
+            actor: The actor handle to look up.
+        """
         actor_ids = [a._ray_actor_id for a in self._actor_handles]
         try:
             rank = actor_ids.index(actor._ray_actor_id)
@@ -156,19 +214,40 @@ class _HcclGroup(Communicator):
         return rank
 
     def get_self_rank(self) -> Optional[int]:
+        """
+        Return this actor's rank.
+        """
         return self._rank
 
     def get_world_size(self) -> int:
+        """
+        Return the number of ranks in the HCCL communicator.
+        """
         return self._world_size
 
     def send(self, buf: "torch.Tensor", peer_rank: int) -> None:
+        """
+        Send a torch.Tensor to a peer.
+
+        This returns when the send kernel has been queued, but the kernel may
+        not have completed. Therefore, the caller should ensure that there are
+        no concurrent writes to the sent `buf` until the send has finished.
+        That is, either all writes should be submitted on the current stream
+        (self._npu_stream) or, if on a different stream, that stream should
+        synchronize with the current stream.
+
+        Args:
+            buf: The torch.Tensor to send. It should already be on this
+                actor's default device.
+            peer_rank: The rank of the actor to send to.
+        """
         if self._closed:
             raise RayChannelError("HCCL group has been destroyed.")
 
         if self._use_communication_streams:
-            # We observed that if all recv/compute/send operations run on GPU,
+            # We observed that if all recv/compute/send operations run on NPU,
             # since there is no synchronization, the CPU execution loop may be
-            # far ahead of the GPU operations and lead to runtime failures.
+            # far ahead of the NPU operations and lead to runtime failures.
             # To avoid that, we synchronize on the send stream.
             # TODO(rui): find a better approach
             self._send_stream.synchronize()
@@ -190,15 +269,26 @@ class _HcclGroup(Communicator):
         peer_rank: int,
         allocator=Optional[TorchTensorAllocator],
     ) -> "torch.Tensor":
+        """
+        Receive a torch.Tensor from a peer and synchronize the current stream.
+
+        After this call returns, the receive buffer is safe to read from from
+        any stream. An RayChannelError will be raised if an error occurred (e.g.,
+        remote actor died), and the buffer is not safe to read.
+
+        Args:
+            buf: The torch.Tensor to receive into. This buffer is safe to read
+            peer_rank: The rank of the actor to receive from.
+        """
         if self._closed:
             raise RayChannelError("HCCL group has been destroyed.")
         assert allocator is not None, "HCCL group requires a tensor allocator"
         buf = allocator(shape, dtype)
 
         if self._use_communication_streams:
-            # We observed that if all recv/compute/send operations run on GPU,
+            # We observed that if all recv/compute/send operations run on NPU,
             # since there is no synchronization, the CPU execution loop may be
-            # far ahead of the GPU operations and lead to runtime failures.
+            # far ahead of the NPU operations and lead to runtime failures.
             # To avoid that, we synchronize on the recv stream.
             # TODO(rui): find a better approach
             self._recv_stream.synchronize()
@@ -223,7 +313,7 @@ class _HcclGroup(Communicator):
             # need to synchronize here and check that the channel is still open to
             # ensure that the receive buffer is valid.
             # TODO(swang): Avoid NPU synchronization.
-            self._torch_stream.synchronize()
+            self._npu_stream.synchronize()
 
         if self._closed:
             raise RayChannelError("HCCL group has been destroyed.")
@@ -249,7 +339,7 @@ class _HcclGroup(Communicator):
             send_buf.numel(),
             self.hccl.get_hccl_tensor_dtype(send_buf),
             op.value,
-            self._torch_stream.npu_stream,
+            self._npu_stream.npu_stream,
         )
 
         # Buffer values are undefined if HCCL ops are aborted. Therefore, we
@@ -257,7 +347,7 @@ class _HcclGroup(Communicator):
         # ensure that the receive buffer is valid.
         # TODO(swang): Avoid NPU synchronization.
         # TODO(wxdeng): Use check_async_error.
-        self._torch_stream.synchronize()
+        self._npu_stream.synchronize()
         if self._closed:
             raise RayChannelError(
                 "HCCL group has been destroyed during allreduce operation. "
@@ -297,6 +387,14 @@ class _HcclGroup(Communicator):
 
 
 def get_unique_id() -> str:
+    """
+    Generate a unique HCCL ID.
+
+    This function retrieves a unique identifier for HCCL.
+
+    Returns:
+        str: A unique HCCL ID as a string.
+    """
     from ray.experimental.channel import hccl
 
     set_default_device()

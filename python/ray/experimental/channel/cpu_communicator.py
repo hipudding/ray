@@ -188,4 +188,12 @@ class CPUCommunicator(Communicator):
 
 
 def get_unique_id():
+    """
+    Generate a unique identifier.
+
+    This function returns a randomly generated UUID as cpu communicator's unique identifier.
+
+    Returns:
+        str: A unique identifier as a string.
+    """
     return str(uuid.uuid4())

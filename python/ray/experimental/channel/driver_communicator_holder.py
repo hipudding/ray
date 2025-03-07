@@ -9,8 +9,18 @@ if TYPE_CHECKING:
 
 class _DriverGroupHolder(Communicator):
     """
-    Communicator place holder for Driver, Since driver may has no
-    Accelerators, TorchDeviceManager cannot be used.
+    The driver maintains a communicator instance but does not participate
+    in the group. However, it still needs to store certain information,
+    such as world size and actor details.
+
+    Since the driver may not have a GPU (or other accelerators), it could
+    mistakenly select the wrong `TorchDeviceManager`
+    (e.g., `CPUTorchDeviceManager`), causing `get_communicator`
+    to return `None`.
+
+    Because the driver does not actively join the group and only uses the
+    communicator for metadata storage, Introduced a hardware-independent
+    class specifically for the driver.
     """
 
     def __init__(
@@ -20,7 +30,7 @@ class _DriverGroupHolder(Communicator):
         actor_handles: List["ray.actor.ActorHandle"],
     ):
         """
-        We only need to store the actor handles, since we don't need
+        Only need to store the actor handles, since we don't need
         to initialize the communicator for Driver.
         """
         self._world_size = world_size

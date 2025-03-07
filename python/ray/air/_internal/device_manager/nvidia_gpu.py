@@ -108,6 +108,7 @@ class CUDATorchDeviceManager(TorchDeviceManager):
         )
 
     def get_communication_id(self):
+        """Get a communicator unique id"""
         from ray.experimental.channel.nccl_group import get_unique_id
 
         return get_unique_id()

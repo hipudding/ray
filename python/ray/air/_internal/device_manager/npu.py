@@ -129,7 +129,7 @@ class NPUTorchDeviceManager(TorchDeviceManager):
             comm_id=comm_id,
             rank=rank,
             actor_handles=actor_handles,
-            torch_stream=torch_stream,
+            npu_stream=torch_stream,
             use_communication_streams=use_communication_streams,
         )
 
