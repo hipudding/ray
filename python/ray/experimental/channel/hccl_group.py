@@ -1,6 +1,6 @@
 import logging
 from types import ModuleType
-from typing import TYPE_CHECKING, List, Optional, Tuple
+from typing import TYPE_CHECKING, List, Optional, Tuple, Any
 
 import ray
 from ray.exceptions import RayChannelError
@@ -15,6 +15,65 @@ if TYPE_CHECKING:
 # into the program using Ray. Ray provides a default configuration at
 # entry/init points.
 logger = logging.getLogger(__name__)
+
+def set_default_device():
+    import torch
+    import torch_npu  # noqa: F401
+    from ray.air._internal import torch_utils
+
+    device = torch_utils.get_devices()[0]
+    torch.npu.set_device(device)
+    return device
+
+class StreamContext:
+
+    cur_stream: Optional["torch.npu.Stream"]
+
+    def __init__(self, stream: Optional["torch.npu.Stream"]):
+        import torch
+        import torch_npu  # noqa: F401
+
+        self.stream = stream
+        self.idx = torch.npu.current_device()
+        if self.idx is None:
+            self.idx = -1
+
+        self.src_prev_stream = None
+        self.dst_prev_stream = None
+
+    def __enter__(self):
+        import torch
+        import torch_npu  # noqa: F401
+
+        # Local cur_stream variable for type refinement
+        cur_stream = self.stream
+        # Return if stream is None or npu device not available
+        if cur_stream is None or self.idx == -1:
+            return
+        self.src_prev_stream = torch.npu.current_stream(None)
+
+        # If the stream is not on the current device, then
+        # set the current stream on the device
+        if self.src_prev_stream.device != cur_stream.device:
+            with torch.npu.device(cur_stream.device):
+                self.dst_prev_stream = torch.npu.current_stream(cur_stream.device)
+        torch.npu.set_stream(cur_stream)
+
+    def __exit__(self, type: Any, value: Any, traceback: Any):
+        import torch
+        import torch_npu  # noqa: F401
+
+        # Local cur_stream variable for type refinement
+        cur_stream = self.stream
+        # If stream is None or no npu device available, return
+        if cur_stream is None or self.idx == -1:
+            return
+
+        # Reset the stream on the original device
+        # and destination device
+        if self.src_prev_stream.device != cur_stream.device:  # type: ignore[union-attr]
+            torch.npu.set_stream(self.dst_prev_stream)  # type: ignore[arg-type]
+        torch.npu.set_stream(self.src_prev_stream)  # type: ignore[arg-type]
 
 
 class _HcclGroup(Communicator):
@@ -39,6 +98,8 @@ class _HcclGroup(Communicator):
         self.hccl: Optional[ModuleType] = None
         self._actor_handles = actor_handles
         self._use_communication_streams = use_communication_streams
+
+        device = set_default_device()
 
         if rank is not None:
             assert "NPU" in ray.cluster_resources(), "HCCL actor has no NPUs assigned"
@@ -69,10 +130,6 @@ class _HcclGroup(Communicator):
             if use_communication_streams:
                 import torch
                 import torch_npu  # noqa: F401
-                from ray.air._internal import torch_utils
-
-                # TODO(swang): Allow default device to be overridden.
-                device = torch_utils.get_devices()[0]
 
                 self._send_stream = torch.npu.Stream(device=device)
                 self._recv_stream = torch.npu.Stream(device=device)
@@ -163,7 +220,7 @@ class _HcclGroup(Communicator):
             # Buffer values are undefined if HCCL ops are aborted. Therefore, we
             # need to synchronize here and check that the channel is still open to
             # ensure that the receive buffer is valid.
-            # TODO(swang): Avoid CUDA synchronization.
+            # TODO(swang): Avoid NPU synchronization.
             self._torch_stream.synchronize()
 
         if self._closed:
@@ -196,7 +253,7 @@ class _HcclGroup(Communicator):
         # Buffer values are undefined if HCCL ops are aborted. Therefore, we
         # need to synchronize here and check that the channel is still open to
         # ensure that the receive buffer is valid.
-        # TODO(swang): Avoid CUDA synchronization.
+        # TODO(swang): Avoid NPU synchronization.
         # TODO(wxdeng): Use check_async_error.
         self._torch_stream.synchronize()
         if self._closed:
@@ -208,17 +265,11 @@ class _HcclGroup(Communicator):
 
     @property
     def recv_stream(self):
-        import torch
-        import torch_npu  # noqa: F401
-
-        return torch.npu.utils.stream(self._recv_stream)
+        return StreamContext(self._recv_stream)
 
     @property
     def send_stream(self):
-        import torch
-        import torch_npu  # noqa: F401
-
-        return torch.npu.utils.stream(self._send_stream)
+        return StreamContext(self._send_stream)
 
     def destroy(self) -> None:
         """
@@ -246,4 +297,5 @@ class _HcclGroup(Communicator):
 def get_unique_id() -> str:
     from ray.experimental.channel import hccl
 
+    set_default_device()
     return hccl.get_unique_id()
